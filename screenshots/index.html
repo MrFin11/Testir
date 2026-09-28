@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Купи-Доставь — тестовый стенд</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f0f2f5; color: #222; }
+        h1 { margin-top: 0; color: #1a2b4a; }
+        h2 { margin: 0 0 10px; color: #1a2b4a; font-size: 18px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .panel { background: #fff; padding: 18px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
+        .panel.wide { grid-column: 1 / -1; }
+        button { padding: 8px 14px; margin: 4px 4px 4px 0; cursor: pointer; border-radius: 6px; border: 1px solid #c5cdd8; background: #fff; font-size: 14px; transition: 0.15s; }
+        button:hover { background: #eef3fb; border-color: #4a90d9; }
+        button.primary { background: #4a90d9; color: #fff; border-color: #4a90d9; }
+        button.primary:hover { background: #3a7bc0; }
+        button.danger { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+        button.danger:hover { background: #c0392b; }
+        input, select { padding: 6px 8px; border: 1px solid #c5cdd8; border-radius: 4px; font-size: 14px; margin: 2px 4px 2px 0; }
+        label { display: inline-block; margin: 4px 8px 4px 0; font-size: 14px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+        th, td { border: 1px solid #e0e5ec; padding: 6px 8px; text-align: left; }
+        th { background: #4a90d9; color: #fff; position: sticky; top: 0; }
+        tr:nth-child(even) { background: #f8fafc; }
+        tr.bad { background: #ffe3e3; }
+        tr.bad td { color: #b00; font-weight: 500; }
+        textarea { width: 100%; height: 90px; font-family: 'Consolas', monospace; font-size: 13px; padding: 10px; border: 1px solid #c5cdd8; border-radius: 6px; resize: vertical; }
+        #log { background: #1e1e1e; color: #4ade80; padding: 12px; font-family: 'Consolas', monospace; font-size: 12px; max-height: 160px; overflow-y: auto; border-radius: 6px; }
+        .table-wrap { max-height: 300px; overflow-y: auto; border-radius: 6px; }
+        .hint { font-size: 13px; color: #667; margin: 6px 0; }
+        .sql-result { margin-top: 10px; }
+        .error { color: #e74c3c; font-weight: 500; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+        .tabs button.active { background: #4a90d9; color: #fff; border-color: #4a90d9; }
+    </style>
+</head>
+<body>
+    <h1>🛒 Купи-Доставь — тестовый стенд</h1>
+    <p class="hint">Интерфейс магазина + живой доступ к БД. Всё работает в браузере. <b>Ваша задача — найти баги.</b></p>
+
+    <div class="grid">
+        <div>
+            <div class="panel">
+                <h2>1. Действия пользователя</h2>
+                <p class="hint">Заполните форму и оформите заказ:</p>
+
+                <label>Пользователь:
+                    <select id="userId">
+                        <option value="1">Иван Иванов (id=1)</option>
+                        <option value="2">Пётр Петров (id=2)</option>
+                        <option value="3">Анна Сидорова (id=3)</option>
+                        <option value="999">Несуществующий (id=999)</option>
+                    </select>
+                </label>
+                <br>
+
+                <label>Товар:
+                    <select id="productId">
+                        <option value="1">Ноутбук — 50000₽ (10 шт)</option>
+                        <option value="2">Мышь — 1500₽ (50 шт)</option>
+                        <option value="3">Клавиатура — 3000₽ (20 шт)</option>
+                        <option value="4">Монитор — 20000₽ (5 шт)</option>
+                        <option value="5">Наушники — 2500₽ (-3 шт)</option>
+                    </select>
+                </label>
+                <br>
+
+                <label>Кол-во: <input type="number" id="qty" value="1" style="width:80px"></label>
+                <br>
+
+                <button class="primary" onclick="placeOrder()">✅ Оформить заказ</button>
+                <button onclick="cancelLastOrder()">↩️ Отменить последний</button>
+                <button class="danger" onclick="resetDB()">🔄 Сбросить БД</button>
+            </div>
+
+            <div class="panel">
+                <h2>2. Лог событий</h2>
+                <div id="log"></div>
+            </div>
+        </div>
+
+        <div>
+            <div class="panel">
+                <h2>3. Таблицы БД </h2>
+                <div class="tabs">
+                    <button id="tab-users" class="active" onclick="showTable('users')">users</button>
+                    <button id="tab-products" onclick="showTable('products')">products</button>
+                    <button id="tab-orders" onclick="showTable('orders')">orders</button>
+                </div>
+                <div class="table-wrap" id="tableOutput"></div>
+            </div>
+        </div>
+
+        <div class="panel wide">
+            <h2>4. SQL-запросы</h2>
+            <p class="hint">Пишите запросы и нажимайте «Выполнить». Можно использовать SELECT для проверки данных и INSERT для добавления.</p>
+            <textarea id="sqlInput">SELECT * FROM orders WHERE total != quantity * (SELECT price FROM products WHERE id = product_id);</textarea>
+            <br>
+            <button class="primary" onclick="runSQL()">▶ Выполнить</button>
+            <button onclick="clearSQL()">Очистить</button>
+            <div class="sql-result" id="sqlOutput"></div>
+        </div>
+    </div>
+
+<script>
+let db;
+let currentTable = 'users';
+
+const SCHEMA = `
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone_number TEXT,
+    email TEXT,
+    FIO TEXT,
+    address TEXT
+);
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    price REAL NOT NULL,
+    stock INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    product_id INTEGER,
+    quantity INTEGER,
+    total REAL,
+    status TEXT DEFAULT 'pending'
+);
+`;
+
+const DATA = `
+INSERT INTO users (phone_number, email, FIO, address) VALUES
+('+7-900-111-11-11', 'ivan@test.com', 'Иван Иванов', 'Москва, ул. Ленина, 1'),
+('+7-900-222-22-22', 'petr@test.com', 'Пётр Петров', 'СПб, Невский пр., 10'),
+('+7-900-333-33-33', 'anna@test.com', 'Анна Сидорова', 'Казань, ул. Баумана, 5');
+
+INSERT INTO products (title, price, stock) VALUES
+('Ноутбук', 50000, 10),
+('Мышь', 1500, 50),
+('Клавиатура', 3000, 20),
+('Монитор', 20000, 5),
+('Наушники', 2500, -3);
+
+INSERT INTO orders (user_id, product_id, quantity, total, status) VALUES
+(1, 1, 1, 50000, 'completed'),
+(1, 2, 2, 3000, 'completed'),
+(2, 3, 1, 3000, 'pending'),
+(2, 4, 1, 20000, 'cancelled'),
+(3, 5, 2, 5000, 'completed'),
+(99, 1, 1, 50000, 'pending'),
+(1, 1, 0, 0, 'completed');
+`;
+
+function log(msg, type = 'info') {
+    const el = document.getElementById('log');
+    const color = type === 'error' ? '#f87171' : type === 'success' ? '#4ade80' : '#93c5fd';
+    el.innerHTML += `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+}
+
+async function initDB() {
+    const SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}` });
+    db = new SQL.Database();
+    db.run(SCHEMA);
+    db.run(DATA);
+    log('БД инициализирована. Данные загружены.');
+    showTable('users');
+}
+
+function resetDB() {
+    db.run('DROP TABLE IF EXISTS orders; DROP TABLE IF EXISTS products; DROP TABLE IF EXISTS users;');
+    db.run(SCHEMA);
+    db.run(DATA);
+    log('🔄 БД сброшена к исходному состоянию.', 'success');
+    showTable(currentTable);
+    document.getElementById('sqlOutput').innerHTML = '';
+}
+
+function placeOrder() {
+    const uid = +document.getElementById('userId').value;
+    const pid = +document.getElementById('productId').value;
+    const qty = +document.getElementById('qty').value;
+
+    const priceRes = db.exec(`SELECT price FROM products WHERE id = ${pid}`);
+    if (!priceRes.length) { log('❌ Товар не найден', 'error'); return; }
+    const price = priceRes[0].values[0][0];
+
+    const total = price; 
+
+    db.run(`INSERT INTO orders (user_id, product_id, quantity, total, status) VALUES (${uid}, ${pid}, ${qty}, ${total}, 'pending')`);
+    db.run(`UPDATE products SET stock = stock - ${qty} WHERE id = ${pid}`);
+
+    log(`✅ Заказ создан: user=${uid}, product=${pid}, qty=${qty}, total=${total}`, 'success');
+    showTable('orders');
+}
+
+function cancelLastOrder() {
+    const res = db.exec('SELECT id, product_id, quantity FROM orders ORDER BY id DESC LIMIT 1');
+    if (!res.length) { log('Нет заказов', 'error'); return; }
+    const [oid, pid, qty] = res[0].values[0];
+
+    db.run(`UPDATE products SET stock = stock + ${qty} WHERE id = 1`); 
+    db.run(`UPDATE orders SET status = 'cancelled' WHERE id = ${oid}`);
+
+    log(`↩️ Заказ #${oid} отменён, stock возвращён товару id=1`, 'success');
+    showTable('products');
+}
+// =================================================
+
+function showTable(name) {
+    currentTable = name;
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    const tab = document.getElementById('tab-' + name);
+    if (tab) tab.classList.add('active');
+
+    const res = db.exec(`SELECT * FROM ${name}`);
+    if (!res.length) { document.getElementById('tableOutput').innerHTML = '<p>Пусто</p>'; return; }
+    const { columns, values } = res[0];
+
+    let html = '<table><tr>' + columns.map(c => `<th>${c}</th>`).join('') + '</tr>';
+    for (const row of values) {
+        const isBad = row.some(v =>
+            v === null || v === '' ||
+            (typeof v === 'number' && v < 0) ||
+            (typeof v === 'number' && v === 0 && row.includes(0) && columns.includes('quantity'))
+        );
+        html += `<tr class="${isBad ? 'bad' : ''}">` + row.map(v => `<td>${v === null ? 'NULL' : v}</td>`).join('') + '</tr>';
+    }
+    html += '</table>';
+    document.getElementById('tableOutput').innerHTML = html;
+    log(`📊 Показана таблица ${name} (${values.length} строк)`);
+}
+
+function runSQL() {
+    const sql = document.getElementById('sqlInput').value.trim();
+    if (!sql) return;
+    try {
+        const res = db.exec(sql);
+        if (!res.length) {
+            document.getElementById('sqlOutput').innerHTML = '<p class="error">Нет результатов (запрос выполнен, но не вернул строк).</p>';
+            log(`▶ SQL выполнен (без результата)`, 'success');
+            return;
+        }
+        const { columns, values } = res[0];
+        let html = '<table><tr>' + columns.map(c => `<th>${c}</th>`).join('') + '</tr>';
+        for (const row of values) {
+            html += '<tr>' + row.map(v => `<td>${v === null ? 'NULL' : v}</td>`).join('') + '</tr>';
+        }
+        html += '</table>';
+        document.getElementById('sqlOutput').innerHTML = html;
+        log(`▶ SQL выполнен: ${values.length} строк`, 'success');
+
+        if (/insert|update|delete/i.test(sql)) {
+            showTable(currentTable);
+        }
+    } catch (e) {
+        document.getElementById('sqlOutput').innerHTML = `<p class="error">Ошибка: ${e.message}</p>`;
+        log(`❌ SQL ошибка: ${e.message}`, 'error');
+    }
+}
+
+function clearSQL() {
+    document.getElementById('sqlInput').value = '';
+    document.getElementById('sqlOutput').innerHTML = '';
+}
+
+initDB();
+</script>
+</body>
+</html>
